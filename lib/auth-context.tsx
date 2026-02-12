@@ -22,14 +22,7 @@ interface AuthContextType {
 const AuthContext = createContext<AuthContextType | undefined>(undefined)
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [user, setUser] = useState<User | null>({
-    id: "user-1",
-    name: "Demo User",
-    email: "demo@soile.app",
-    avatar: "D",
-    score: 7.2,
-    sessions: 14,
-  })
+  const [user, setUser] = useState<User | null>(null)
   const [isLoading, setIsLoading] = useState(false)
 
   const login = useCallback(async (email: string, _password: string) => {
