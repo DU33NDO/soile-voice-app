@@ -3,17 +3,43 @@
 import { useState, useRef, useCallback, useEffect } from "react"
 import { Mic, Square, Upload, RotateCcw, Loader2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { getRandomTopic } from "@/lib/mock-data"
+import { useLanguage, type Lang, WHISPER_LANG } from "@/lib/i18n/context"
+import { TopicPicker } from "@/components/topic-picker"
 
 interface AIFeedback {
   confidenceScore: number
-  parasiteWords: { word: string; count: number }[]
+  parasiteWords: { word: string; count: number; suggestion: string }[]
   tips: string[]
   summary: string
+  transcript?: string
 }
 
-export function VoiceRecorder() {
-  const [topic, setTopic] = useState(getRandomTopic)
+const SPEECH_LANGS: { value: Lang; label: string }[] = [
+  { value: "en", label: "English" },
+  { value: "ru", label: "Русский" },
+  { value: "kz", label: "Қазақша" },
+]
+
+interface VoiceRecorderProps {
+  initialTopic?: string
+}
+
+export function VoiceRecorder({ initialTopic }: VoiceRecorderProps) {
+  const { t, lang } = useLanguage()
+
+  const allTopics = t.voice.topicCategories.flatMap((c) => c.topics)
+
+  const [topic, setTopic] = useState<string>(() => {
+    if (initialTopic) return initialTopic
+    return allTopics[Math.floor(Math.random() * allTopics.length)] ?? ""
+  })
+
+  // When initialTopic prop changes (practice-again flow), update topic
+  useEffect(() => {
+    if (initialTopic) setTopic(initialTopic)
+  }, [initialTopic])
+
+  const [speechLang, setSpeechLang] = useState<Lang>(lang)
   const [isRecording, setIsRecording] = useState(false)
   const [recordingTime, setRecordingTime] = useState(0)
   const [audioBlob, setAudioBlob] = useState<Blob | null>(null)
@@ -23,6 +49,11 @@ export function VoiceRecorder() {
   const chunksRef = useRef<Blob[]>([])
   const timerRef = useRef<NodeJS.Timeout | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
+
+  // Keep speechLang in sync when UI language changes
+  useEffect(() => {
+    setSpeechLang(lang)
+  }, [lang])
 
   useEffect(() => {
     return () => {
@@ -80,35 +111,39 @@ export function VoiceRecorder() {
   const analyzeAudio = useCallback(async () => {
     if (!audioBlob) return
     setIsAnalyzing(true)
-    // Simulate AI analysis
-    await new Promise((resolve) => setTimeout(resolve, 2500))
-    setFeedback({
-      confidenceScore: Math.round((Math.random() * 3 + 6.5) * 10) / 10,
-      parasiteWords: [
-        { word: "um", count: Math.floor(Math.random() * 8) + 1 },
-        { word: "like", count: Math.floor(Math.random() * 6) + 1 },
-        { word: "you know", count: Math.floor(Math.random() * 4) },
-        { word: "so", count: Math.floor(Math.random() * 5) + 1 },
-        { word: "basically", count: Math.floor(Math.random() * 3) },
-      ].filter((w) => w.count > 0),
-      tips: [
-        "Try pausing instead of using filler words",
-        "Vary your tone to emphasize key points",
-        "Slow down slightly at transitions between ideas",
-        "Your opening was strong - maintain that energy throughout",
-      ],
-      summary:
-        "Good effort! Your speech had a clear structure and the main points came through well. Focus on reducing filler words during transitions and you'll see a significant improvement in perceived confidence.",
-    })
-    setIsAnalyzing(false)
-  }, [audioBlob])
+    try {
+      const ext = audioBlob.type.includes("webm") ? "webm" : "mp3"
+      const formData = new FormData()
+      formData.append(
+        "audio",
+        new File([audioBlob], `recording.${ext}`, { type: audioBlob.type })
+      )
+      formData.append("topic", topic)
+      formData.append("lang", WHISPER_LANG[speechLang])
+      formData.append("uiLang", speechLang)
+
+      const res = await fetch("/api/voice/analyze", {
+        method: "POST",
+        body: formData,
+      })
+
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || "Analysis failed")
+      setFeedback(data)
+    } catch (err) {
+      console.error("Analysis error:", err)
+      alert(err instanceof Error ? err.message : "Analysis failed. Please try again.")
+    } finally {
+      setIsAnalyzing(false)
+    }
+  }, [audioBlob, topic, speechLang])
 
   const reset = useCallback(() => {
     setAudioBlob(null)
     setFeedback(null)
     setRecordingTime(0)
-    setTopic(getRandomTopic())
-  }, [])
+    setTopic(allTopics[Math.floor(Math.random() * allTopics.length)] ?? "")
+  }, [allTopics])
 
   const formatTime = (seconds: number) => {
     const mins = Math.floor(seconds / 60)
@@ -120,33 +155,66 @@ export function VoiceRecorder() {
     <div>
       <div className="mb-8">
         <h2 className="text-2xl font-bold tracking-tight text-foreground">
-          Voice Analysis
+          {t.voice.title}
         </h2>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Record your speech or upload an audio file for AI feedback
-        </p>
+        <p className="mt-1 text-sm text-muted-foreground">{t.voice.subtitle}</p>
       </div>
 
-      {/* Topic Card */}
-      <div className="mb-6 rounded-xl border border-border bg-card p-5">
-        <div className="flex items-center justify-between">
-          <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
-            Your Topic
-          </p>
-          <button
-            onClick={() => setTopic(getRandomTopic())}
-            className="text-xs text-primary hover:text-primary/80 transition-colors"
-          >
-            New topic
-          </button>
+      {/* Topic Picker */}
+      <TopicPicker selectedTopic={topic} onTopicChange={setTopic} />
+
+      {/* Speech Language Selector */}
+      {!feedback && !isAnalyzing && (
+        <div className="mb-6 flex items-center gap-3">
+          <p className="text-xs font-medium text-muted-foreground">{t.voice.speechLang}:</p>
+          <div className="flex gap-1">
+            {SPEECH_LANGS.map((l) => (
+              <button
+                key={l.value}
+                onClick={() => setSpeechLang(l.value)}
+                className={`rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${
+                  speechLang === l.value
+                    ? "bg-primary/10 text-primary"
+                    : "bg-secondary text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                {l.label}
+              </button>
+            ))}
+          </div>
         </div>
-        <p className="mt-2 text-lg font-medium text-foreground leading-relaxed">
-          {topic}
-        </p>
-      </div>
+      )}
+
+      {/* Analyzing animation */}
+      {isAnalyzing && (
+        <div className="mb-6 flex flex-col items-center rounded-xl border border-primary/20 bg-card p-10">
+          {/* Waveform bars */}
+          <div className="mb-6 flex items-end gap-1.5 h-12">
+            {[0, 0.15, 0.3, 0.45, 0.6, 0.45, 0.3, 0.15, 0].map((delay, i) => (
+              <div
+                key={i}
+                className="wave-bar w-2 rounded-full bg-primary"
+                style={{
+                  height: "100%",
+                  animationDelay: `${delay}s`,
+                  opacity: 0.5 + (1 - Math.abs(i - 4) / 4) * 0.5,
+                }}
+              />
+            ))}
+          </div>
+
+          <p className="mb-1 text-sm font-semibold text-foreground">{t.voice.analyzing}</p>
+          <p className="mb-5 text-xs text-muted-foreground">{topic}</p>
+
+          {/* Indeterminate progress bar */}
+          <div className="w-full max-w-xs overflow-hidden rounded-full bg-secondary h-1.5">
+            <div className="animate-progress h-full w-1/3 rounded-full bg-primary" />
+          </div>
+        </div>
+      )}
 
       {/* Recording Area */}
-      {!feedback && (
+      {!feedback && !isAnalyzing && (
         <div className="mb-6 flex flex-col items-center rounded-xl border border-border bg-card p-8">
           {!audioBlob ? (
             <>
@@ -154,7 +222,10 @@ export function VoiceRecorder() {
                 {isRecording && (
                   <>
                     <div className="absolute inset-0 rounded-full bg-primary/20 animate-pulse-ring" />
-                    <div className="absolute inset-[-8px] rounded-full bg-primary/10 animate-pulse-ring" style={{ animationDelay: "0.5s" }} />
+                    <div
+                      className="absolute inset-[-8px] rounded-full bg-primary/10 animate-pulse-ring"
+                      style={{ animationDelay: "0.5s" }}
+                    />
                   </>
                 )}
                 <button
@@ -183,12 +254,10 @@ export function VoiceRecorder() {
                 </div>
               ) : (
                 <div className="text-center">
-                  <p className="text-sm text-muted-foreground">
-                    Tap to start recording
-                  </p>
+                  <p className="text-sm text-muted-foreground">{t.voice.tapToRecord}</p>
                   <div className="mt-4 flex items-center gap-2">
                     <div className="h-px flex-1 bg-border" />
-                    <span className="text-xs text-muted-foreground">or</span>
+                    <span className="text-xs text-muted-foreground">{t.voice.or}</span>
                     <div className="h-px flex-1 bg-border" />
                   </div>
                   <Button
@@ -197,7 +266,7 @@ export function VoiceRecorder() {
                     onClick={() => fileInputRef.current?.click()}
                   >
                     <Upload className="mr-2 h-4 w-4" />
-                    Upload audio file
+                    {t.voice.uploadAudio}
                   </Button>
                   <input
                     ref={fileInputRef}
@@ -205,7 +274,7 @@ export function VoiceRecorder() {
                     accept="audio/*"
                     onChange={handleFileUpload}
                     className="hidden"
-                    aria-label="Upload audio file"
+                    aria-label={t.voice.uploadAudio}
                   />
                 </div>
               )}
@@ -215,16 +284,20 @@ export function VoiceRecorder() {
               <div className="mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-primary/10 mx-auto">
                 <Mic className="h-7 w-7 text-primary" />
               </div>
-              <p className="text-sm font-medium text-foreground">
-                Audio ready for analysis
-              </p>
+              <p className="text-sm font-medium text-foreground">{t.voice.audioReady}</p>
               <p className="mt-1 text-xs text-muted-foreground">
-                {recordingTime > 0 ? `${formatTime(recordingTime)} recorded` : "File uploaded"}
+                {recordingTime > 0
+                  ? `${formatTime(recordingTime)} ${t.voice.recorded}`
+                  : t.voice.fileUploaded}
               </p>
               <div className="mt-5 flex gap-3">
-                <Button variant="outline" onClick={reset} className="border-border text-muted-foreground hover:text-foreground">
+                <Button
+                  variant="outline"
+                  onClick={reset}
+                  className="border-border text-muted-foreground hover:text-foreground"
+                >
                   <RotateCcw className="mr-2 h-4 w-4" />
-                  Re-record
+                  {t.voice.reRecord}
                 </Button>
                 <Button
                   onClick={analyzeAudio}
@@ -234,10 +307,10 @@ export function VoiceRecorder() {
                   {isAnalyzing ? (
                     <>
                       <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                      Analyzing...
+                      {t.voice.analyzing}
                     </>
                   ) : (
-                    "Analyze with AI"
+                    t.voice.analyzeAI
                   )}
                 </Button>
               </div>
@@ -254,7 +327,7 @@ export function VoiceRecorder() {
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
-                  Confidence Score
+                  {t.voice.confidenceScore}
                 </p>
                 <div className="mt-2 flex items-baseline gap-1">
                   <span className="text-5xl font-bold text-primary">
@@ -281,41 +354,53 @@ export function VoiceRecorder() {
           </div>
 
           {/* Parasite Words */}
-          <div className="rounded-xl border border-border bg-card p-6">
-            <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground mb-4">
-              Filler Words Detected
-            </p>
-            <div className="flex flex-wrap gap-2">
-              {feedback.parasiteWords.map((w) => (
-                <div
-                  key={w.word}
-                  className="flex items-center gap-2 rounded-lg bg-secondary px-3 py-2"
-                >
-                  <span className="text-sm font-medium text-foreground">
-                    {`"${w.word}"`}
-                  </span>
-                  <span className="rounded-full bg-destructive/10 px-2 py-0.5 text-xs font-medium text-destructive">
-                    {w.count}x
-                  </span>
-                </div>
-              ))}
+          {feedback.parasiteWords.length > 0 && (
+            <div className="rounded-xl border border-border bg-card p-6">
+              <div className="flex items-center justify-between mb-4">
+                <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                  {t.voice.fillerWords}
+                </p>
+                <span className="rounded-full bg-destructive/10 px-2.5 py-1 text-xs font-semibold text-destructive">
+                  {feedback.parasiteWords.reduce((s, w) => s + w.count, 0)} total
+                </span>
+              </div>
+              <div className="flex flex-col gap-2">
+                {feedback.parasiteWords.map((w) => (
+                  <div
+                    key={w.word}
+                    className="flex items-center justify-between rounded-lg bg-secondary px-3 py-2.5"
+                  >
+                    <div className="flex items-center gap-2 min-w-0">
+                      <span className="text-sm font-medium text-foreground shrink-0">
+                        &ldquo;{w.word}&rdquo;
+                      </span>
+                      <span className="rounded-full bg-destructive/10 px-2 py-0.5 text-xs font-medium text-destructive shrink-0">
+                        {w.count}×
+                      </span>
+                      {w.suggestion && (
+                        <span className="truncate text-xs text-muted-foreground">
+                          → {w.suggestion}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
             </div>
-          </div>
+          )}
 
           {/* Summary */}
           <div className="rounded-xl border border-border bg-card p-6">
             <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground mb-3">
-              AI Summary
+              {t.voice.aiSummary}
             </p>
-            <p className="text-sm text-foreground leading-relaxed">
-              {feedback.summary}
-            </p>
+            <p className="text-sm text-foreground leading-relaxed">{feedback.summary}</p>
           </div>
 
           {/* Tips */}
           <div className="rounded-xl border border-border bg-card p-6">
             <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground mb-4">
-              Tips for Improvement
+              {t.voice.tipsTitle}
             </p>
             <ul className="flex flex-col gap-3">
               {feedback.tips.map((tip, i) => (
@@ -333,7 +418,7 @@ export function VoiceRecorder() {
             onClick={reset}
             className="w-full bg-primary text-primary-foreground hover:bg-primary/90"
           >
-            Start New Session
+            {t.voice.newSession}
           </Button>
         </div>
       )}

@@ -2,37 +2,62 @@
 
 import { useState } from "react"
 import { useAuth } from "@/lib/auth-context"
+import { useLanguage, type Lang } from "@/lib/i18n/context"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Loader2 } from "lucide-react"
+
+const LANGS: Lang[] = ["en", "ru", "kz"]
 
 export function AuthForm() {
   const [mode, setMode] = useState<"login" | "signup">("login")
   const [name, setName] = useState("")
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
+  const [error, setError] = useState("")
   const { login, signup, isLoading } = useAuth()
+  const { lang, setLang, t } = useLanguage()
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (mode === "login") {
-      await login(email, password)
-    } else {
-      await signup(name, email, password)
+    setError("")
+    try {
+      if (mode === "login") {
+        await login(email, password)
+      } else {
+        await signup(name, email, password)
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Something went wrong")
     }
   }
 
   return (
     <div className="flex min-h-screen items-center justify-center px-4">
       <div className="w-full max-w-sm">
+        {/* Language selector */}
+        <div className="mb-6 flex justify-center gap-2">
+          {LANGS.map((l) => (
+            <button
+              key={l}
+              onClick={() => setLang(l)}
+              className={`rounded px-2.5 py-1 text-xs font-semibold uppercase tracking-wide transition-colors ${
+                lang === l
+                  ? "bg-primary/15 text-primary"
+                  : "text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              {t.lang[l]}
+            </button>
+          ))}
+        </div>
+
         <div className="mb-10 text-center">
           <h1 className="text-3xl font-bold tracking-tight text-foreground">
-            soile
+            {t.app.name}
           </h1>
-          <p className="mt-2 text-sm text-muted-foreground">
-            Speak with confidence
-          </p>
+          <p className="mt-2 text-sm text-muted-foreground">{t.app.tagline}</p>
         </div>
 
         <div className="rounded-xl border border-border bg-card p-6">
@@ -46,7 +71,7 @@ export function AuthForm() {
                   : "text-muted-foreground hover:text-foreground"
               }`}
             >
-              Sign in
+              {t.auth.signIn}
             </button>
             <button
               type="button"
@@ -57,7 +82,7 @@ export function AuthForm() {
                   : "text-muted-foreground hover:text-foreground"
               }`}
             >
-              Sign up
+              {t.auth.signUp}
             </button>
           </div>
 
@@ -65,14 +90,14 @@ export function AuthForm() {
             {mode === "signup" && (
               <div className="flex flex-col gap-2">
                 <Label htmlFor="name" className="text-sm text-muted-foreground">
-                  Name
+                  {t.auth.name}
                 </Label>
                 <Input
                   id="name"
                   type="text"
                   value={name}
                   onChange={(e) => setName(e.target.value)}
-                  placeholder="Your name"
+                  placeholder={t.auth.namePlaceholder}
                   required
                   className="bg-secondary border-0 placeholder:text-muted-foreground/50"
                 />
@@ -80,32 +105,37 @@ export function AuthForm() {
             )}
             <div className="flex flex-col gap-2">
               <Label htmlFor="email" className="text-sm text-muted-foreground">
-                Email
+                {t.auth.email}
               </Label>
               <Input
                 id="email"
                 type="email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                placeholder="you@example.com"
+                placeholder={t.auth.emailPlaceholder}
                 required
                 className="bg-secondary border-0 placeholder:text-muted-foreground/50"
               />
             </div>
             <div className="flex flex-col gap-2">
               <Label htmlFor="password" className="text-sm text-muted-foreground">
-                Password
+                {t.auth.password}
               </Label>
               <Input
                 id="password"
                 type="password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                placeholder="Enter your password"
+                placeholder={t.auth.passwordPlaceholder}
                 required
                 className="bg-secondary border-0 placeholder:text-muted-foreground/50"
               />
             </div>
+
+            {error && (
+              <p className="text-xs text-destructive">{error}</p>
+            )}
+
             <Button
               type="submit"
               disabled={isLoading}
@@ -114,17 +144,15 @@ export function AuthForm() {
               {isLoading ? (
                 <Loader2 className="h-4 w-4 animate-spin" />
               ) : mode === "login" ? (
-                "Sign in"
+                t.auth.signIn
               ) : (
-                "Create account"
+                t.auth.createAccount
               )}
             </Button>
           </form>
         </div>
 
-        <p className="mt-6 text-center text-xs text-muted-foreground">
-          {"By continuing, you agree to Soile's Terms of Service"}
-        </p>
+        <p className="mt-6 text-center text-xs text-muted-foreground">{t.auth.terms}</p>
       </div>
     </div>
   )
