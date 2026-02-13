@@ -36,7 +36,8 @@ app.prepare().then(() => {
 
   const io = new SocketIOServer(httpServer, {
     cors: {
-      origin: process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000",
+      // Mirror the request origin — works for any domain (localhost, Railway, custom)
+      origin: true,
       credentials: true,
     },
   })
